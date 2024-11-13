@@ -1,4 +1,4 @@
-// f1Adaboost.c
+// adaboost.c
 #include <math.h>
 #include <stdio.h>
 
@@ -10,14 +10,12 @@ static int sign(float fx);
 static int H1(float x, float TH);
 static int H2(float x, float TH);
 static int CompClassierDiff(int iInitialDataVal, int iClassierVal);
-static int CountErrRightNum(const int Data[], int Num);
 static int CompMinErrValue(float err1, float err2);
 static void WeightsUpdate(float fNewWcs[], const float fOldWcs[], float fErr,
                           const int ErrHx[], int ErrNumX, int DataNum);
 static float CalcNewClassifersErr(const float fOldDataWeigths[],
                                   const int ErrHx[], int ErrNumX);
 
-// Training data structure
 struct TRAINING {
   float ST;
   float DST;
@@ -25,7 +23,6 @@ struct TRAINING {
 };
 
 int f1Adaboost(float st, float dst) {
-  // Initialize arrays
   float fInitialDataWeigths[DATANUM] = {0};
   float fOldDataWeigths[DATANUM] = {0};
   float fNewDataWeigths[DATANUM] = {0};
@@ -34,15 +31,11 @@ int f1Adaboost(float st, float dst) {
   int ResultH2[DATANUM] = {0};
   int ErrH1[DATANUM] = {0};
   int ErrH2[DATANUM] = {0};
-  int RightH1[DATANUM] = {0};
-  int RightH2[DATANUM] = {0};
 
   int iErrNum1 = 0, iErrNum2 = 0;
-  int iRightNum1 = 0, iRightNum2 = 0;
   float fErr1 = 0, fErr2 = 0;
   float a1 = 0, a2 = 0, ax = 0;
 
-  // Training data
   struct TRAINING TrainingData[DATANUM] = {
       {5, 0.2, 1}, {3, 1.6, 1},  {5, 0.6, 1},    {7, 0.8, 1},    {6.2, 0.6, 1},
       {7, 2, -1},  {8, 2.5, -1}, {6.2, 1.1, -1}, {7.5, 1.6, -1}, {7, 1.1, -1}};
@@ -60,20 +53,12 @@ int f1Adaboost(float st, float dst) {
     ResultH2[i] = H2(TrainingData[i].DST, 1);
   }
 
-  // Find errors and correct classifications
+  // Find errors
   for (int i = 0; i < DATANUM; i++) {
-    int resultH1 = CompClassierDiff(TrainingData[i].SLEEP, ResultH1[i]);
-    int resultH2 = CompClassierDiff(TrainingData[i].SLEEP, ResultH2[i]);
-
-    if (resultH1 == 0) {
-      RightH1[iRightNum1++] = (i + 1);
-    } else {
+    if (CompClassierDiff(TrainingData[i].SLEEP, ResultH1[i])) {
       ErrH1[iErrNum1++] = (i + 1);
     }
-
-    if (resultH2 == 0) {
-      RightH2[iRightNum2++] = (i + 1);
-    } else {
+    if (CompClassierDiff(TrainingData[i].SLEEP, ResultH2[i])) {
       ErrH2[iErrNum2++] = (i + 1);
     }
   }
@@ -113,7 +98,6 @@ int f1Adaboost(float st, float dst) {
   return sign(a1 * ResultFinalL1 + a2 * ResultFinalL2);
 }
 
-// Helper function implementations
 static int sign(float fx) { return (fx >= 0) ? 1 : -1; }
 
 static int H1(float x, float TH) { return (x > TH) ? -1 : 1; }
@@ -122,16 +106,6 @@ static int H2(float x, float TH) { return (x > TH) ? -1 : 1; }
 
 static int CompClassierDiff(int iInitialDataVal, int iClassierVal) {
   return (iInitialDataVal != iClassierVal) ? 1 : 0;
-}
-
-static int CountErrRightNum(const int Data[], int Num) {
-  int CountNum = 0;
-  for (int i = 0; i < Num; i++) {
-    if (Data[i] != 0) {
-      CountNum++;
-    }
-  }
-  return CountNum;
 }
 
 static int CompMinErrValue(float err1, float err2) {

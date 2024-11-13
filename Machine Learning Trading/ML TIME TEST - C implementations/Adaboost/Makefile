@@ -1,17 +1,16 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -O2 -lm
 
-# List the actual source files
-SRC=main.c adaboost.c
-OBJ=$(SRC:.c=.o)
+all: adaboost visualize
 
-all: adaboost
+adaboost: main.o adaboost.o
+	$(CC) -o $@ $^ $(CFLAGS)
 
-adaboost: $(OBJ)
+visualize: visualize.o adaboost.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
 %.o: %.c adaboost.h
 	$(CC) -c $< $(CFLAGS)
 
 clean:
-	rm -f *.o adaboost
+	rm -f *.o adaboost visualize
