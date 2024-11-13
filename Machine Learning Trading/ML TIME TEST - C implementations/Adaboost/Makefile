@@ -1,16 +1,13 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -O2 -lm
+CFLAGS=-Wall -Wextra -O2 -g -lm
 
-all: adaboost visualize
+all: stockpredict
 
-adaboost: main.o adaboost.o
-	$(CC) -o $@ $^ $(CFLAGS)
-
-visualize: visualize.o adaboost.o
+stockpredict: main.o adaboost.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
 %.o: %.c adaboost.h
 	$(CC) -c $< $(CFLAGS)
 
 clean:
-	rm -f *.o adaboost visualize
+	rm -f *.o stockpredict

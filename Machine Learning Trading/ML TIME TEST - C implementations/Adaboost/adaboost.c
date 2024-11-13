@@ -1,134 +1,216 @@
 // adaboost.c
+#include "adaboost.h" // Added this include
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define DATANUM 10
+#define MAX_SAMPLES 1000
 #define ITERATION 3
 
-// Function prototypes
-static int sign(float fx);
-static int H1(float x, float TH);
-static int H2(float x, float TH);
-static int CompClassierDiff(int iInitialDataVal, int iClassierVal);
-static int CompMinErrValue(float err1, float err2);
-static void WeightsUpdate(float fNewWcs[], const float fOldWcs[], float fErr,
-                          const int ErrHx[], int ErrNumX, int DataNum);
-static float CalcNewClassifersErr(const float fOldDataWeigths[],
-                                  const int ErrHx[], int ErrNumX);
+static struct StockData trainingData[MAX_SAMPLES]; // Made static
+static int numSamples = 0;
 
-struct TRAINING {
-  float ST;
-  float DST;
-  int SLEEP;
-};
+// Weak classifiers
+static int priceThresholdClassifier(float price, float threshold) {
+  return (price > threshold) ? 1 : -1;
+}
 
-int f1Adaboost(float st, float dst) {
-  float fInitialDataWeigths[DATANUM] = {0};
-  float fOldDataWeigths[DATANUM] = {0};
-  float fNewDataWeigths[DATANUM] = {0};
+static int volumeThresholdClassifier(float volume, float threshold) {
+  return (volume > threshold) ? 1 : -1;
+}
 
-  int ResultH1[DATANUM] = {0};
-  int ResultH2[DATANUM] = {0};
-  int ErrH1[DATANUM] = {0};
-  int ErrH2[DATANUM] = {0};
+static int volatilityClassifier(float high, float low, float threshold) {
+  float volatility = (high - low) / low;
+  return (volatility > threshold) ? 1 : -1;
+}
 
-  int iErrNum1 = 0, iErrNum2 = 0;
-  float fErr1 = 0, fErr2 = 0;
-  float a1 = 0, a2 = 0, ax = 0;
+void loadTrainingData(const char *filename) {
+  FILE *file = fopen(filename, "r");
+  if (!file) {
+    printf("Error opening file: %s\n", filename);
+    return;
+  }
 
-  struct TRAINING TrainingData[DATANUM] = {
-      {5, 0.2, 1}, {3, 1.6, 1},  {5, 0.6, 1},    {7, 0.8, 1},    {6.2, 0.6, 1},
-      {7, 2, -1},  {8, 2.5, -1}, {6.2, 1.1, -1}, {7.5, 1.6, -1}, {7, 1.1, -1}};
+  char line[1024];
+  // Skip header
+  fgets(line, sizeof(line), file);
+
+  while (fgets(line, sizeof(line), file) && numSamples < MAX_SAMPLES) {
+    char *token = strtok(line, ",");
+    int field = 0;
+
+    while (token != NULL) {
+      switch (field) {
+      case 1: // Price
+        trainingData[numSamples].price = atof(token);
+        break;
+      case 2: // Open
+        trainingData[numSamples].open = atof(token);
+        break;
+      case 3: // High
+        trainingData[numSamples].high = atof(token);
+        break;
+      case 4: // Low
+        trainingData[numSamples].low = atof(token);
+        break;
+      case 5: // Volume
+        trainingData[numSamples].volume = atof(token);
+        break;
+      case 6: // Change %
+        trainingData[numSamples].change = atof(token);
+        // Set trend based on price change
+        trainingData[numSamples].trend = (atof(token) > 0) ? 1 : -1;
+        break;
+      }
+      token = strtok(NULL, ",");
+      field++;
+    }
+    numSamples++;
+  }
+
+  fclose(file);
+  printf("Loaded %d samples from %s\n", numSamples, filename);
+}
+
+int stockAdaboost(float price, float open, float high, float low,
+                  float volume) {
+  (void)open; // Suppress unused parameter warning
+
+  if (numSamples == 0) {
+    printf("No training data loaded!\n");
+    return 0;
+  }
+
+  float *weights = (float *)calloc(numSamples, sizeof(float));
+  float alpha[ITERATION] = {0};
+  int *predictions = (int *)calloc(numSamples, sizeof(int));
 
   // Initialize weights
-  for (int i = 0; i < DATANUM; i++) {
-    fInitialDataWeigths[i] = 1.0f / DATANUM;
-    fOldDataWeigths[i] = fInitialDataWeigths[i];
-    fNewDataWeigths[i] = fInitialDataWeigths[i];
+  for (int i = 0; i < numSamples; i++) {
+    weights[i] = 1.0f / numSamples;
   }
 
-  // Calculate initial classifier results
-  for (int i = 0; i < DATANUM; i++) {
-    ResultH1[i] = H1(TrainingData[i].ST, 6);
-    ResultH2[i] = H2(TrainingData[i].DST, 1);
-  }
+  // AdaBoost iterations
+  for (int t = 0; t < ITERATION; t++) {
+    float minError = INFINITY;
+    int bestClassifier = 0;
+    float bestThreshold = 0;
 
-  // Find errors
-  for (int i = 0; i < DATANUM; i++) {
-    if (CompClassierDiff(TrainingData[i].SLEEP, ResultH1[i])) {
-      ErrH1[iErrNum1++] = (i + 1);
+    // Try different thresholds for each classifier
+    float priceThresholds[] = {price * 0.95f, price, price * 1.05f};
+    float volumeThresholds[] = {volume * 0.5f, volume, volume * 1.5f};
+    float volatilityThresholds[] = {0.01f, 0.02f, 0.03f};
+
+    // Find best classifier and threshold
+    for (int c = 0; c < 3; c++) {
+      float *thresholds;
+      int numThresholds;
+
+      switch (c) {
+      case 0:
+        thresholds = priceThresholds;
+        numThresholds = sizeof(priceThresholds) / sizeof(float);
+        break;
+      case 1:
+        thresholds = volumeThresholds;
+        numThresholds = sizeof(volumeThresholds) / sizeof(float);
+        break;
+      case 2:
+        thresholds = volatilityThresholds;
+        numThresholds = sizeof(volatilityThresholds) / sizeof(float);
+        break;
+      }
+
+      for (int th = 0; th < numThresholds; th++) {
+        float error = 0;
+
+        for (int i = 0; i < numSamples; i++) {
+          int prediction;
+          switch (c) {
+          case 0:
+            prediction =
+                priceThresholdClassifier(trainingData[i].price, thresholds[th]);
+            break;
+          case 1:
+            prediction = volumeThresholdClassifier(trainingData[i].volume,
+                                                   thresholds[th]);
+            break;
+          case 2:
+            prediction = volatilityClassifier(
+                trainingData[i].high, trainingData[i].low, thresholds[th]);
+            break;
+          }
+
+          if (prediction != trainingData[i].trend) {
+            error += weights[i];
+          }
+        }
+
+        if (error < minError) {
+          minError = error;
+          bestClassifier = c;
+          bestThreshold = thresholds[th];
+        }
+      }
     }
-    if (CompClassierDiff(TrainingData[i].SLEEP, ResultH2[i])) {
-      ErrH2[iErrNum2++] = (i + 1);
+
+    // Calculate alpha
+    alpha[t] =
+        0.5f * log((1 - minError) /
+                   (minError +
+                    1e-10)); // Added small constant to prevent division by zero
+
+    // Update weights and store predictions
+    float weightSum = 0;
+    for (int i = 0; i < numSamples; i++) {
+      int prediction;
+      switch (bestClassifier) {
+      case 0:
+        prediction =
+            priceThresholdClassifier(trainingData[i].price, bestThreshold);
+        break;
+      case 1:
+        prediction =
+            volumeThresholdClassifier(trainingData[i].volume, bestThreshold);
+        break;
+      case 2:
+        prediction = volatilityClassifier(trainingData[i].high,
+                                          trainingData[i].low, bestThreshold);
+        break;
+      }
+
+      predictions[i] = prediction;
+      weights[i] *= exp(-alpha[t] * prediction * trainingData[i].trend);
+      weightSum += weights[i];
+    }
+
+    // Normalize weights
+    for (int i = 0; i < numSamples; i++) {
+      weights[i] /= weightSum;
     }
   }
 
-  // Main AdaBoost iterations
-  int ResultFinalL1 = 0, ResultFinalL2 = 0;
-
-  for (int iter = ITERATION - 1; iter >= 0; iter--) {
-    fErr1 = CalcNewClassifersErr(fOldDataWeigths, ErrH1, iErrNum1);
-    fErr2 = CalcNewClassifersErr(fOldDataWeigths, ErrH2, iErrNum2);
-
-    int iMinErrNum = CompMinErrValue(fErr1, fErr2);
-
-    if (iMinErrNum == 1) {
-      ax = 0.5f * log((1 - fErr1) / fErr1);
-      WeightsUpdate(fNewDataWeigths, fOldDataWeigths, fErr1, ErrH1, iErrNum1,
-                    DATANUM);
-    } else {
-      ax = 0.5f * log((1 - fErr2) / fErr2);
-      WeightsUpdate(fNewDataWeigths, fOldDataWeigths, fErr2, ErrH2, iErrNum2,
-                    DATANUM);
+  // Make final prediction
+  float finalPrediction = 0;
+  for (int t = 0; t < ITERATION; t++) {
+    int prediction;
+    switch (t % 3) {
+    case 0:
+      prediction = priceThresholdClassifier(price, price);
+      break;
+    case 1:
+      prediction = volumeThresholdClassifier(volume, volume);
+      break;
+    case 2:
+      prediction = volatilityClassifier(high, low, 0.02f);
+      break;
     }
-
-    if (iter == 1) {
-      a1 = ax;
-      ResultFinalL1 = (iMinErrNum == 1) ? H1(st, 6) : H2(dst, 1);
-    } else if (iter == 0) {
-      a2 = ax;
-      ResultFinalL2 = (iMinErrNum == 1) ? H1(st, 6) : H2(dst, 1);
-    }
-
-    for (int i = 0; i < DATANUM; i++) {
-      fOldDataWeigths[i] = fNewDataWeigths[i];
-    }
+    finalPrediction += alpha[t] * prediction;
   }
 
-  return sign(a1 * ResultFinalL1 + a2 * ResultFinalL2);
-}
+  free(weights);
+  free(predictions);
 
-static int sign(float fx) { return (fx >= 0) ? 1 : -1; }
-
-static int H1(float x, float TH) { return (x > TH) ? -1 : 1; }
-
-static int H2(float x, float TH) { return (x > TH) ? -1 : 1; }
-
-static int CompClassierDiff(int iInitialDataVal, int iClassierVal) {
-  return (iInitialDataVal != iClassierVal) ? 1 : 0;
-}
-
-static int CompMinErrValue(float err1, float err2) {
-  return (err1 <= err2) ? 1 : 2;
-}
-
-static void WeightsUpdate(float fNewWcs[], const float fOldWcs[], float fErr,
-                          const int ErrHx[], int ErrNumX, int DataNum) {
-  for (int i = 0; i < DataNum; i++) {
-    fNewWcs[i] = fOldWcs[i] / (2 * (1 - fErr));
-  }
-
-  for (int i = 0; i < ErrNumX; i++) {
-    int idx = ErrHx[i] - 1;
-    fNewWcs[idx] = fOldWcs[idx] / (2 * fErr);
-  }
-}
-
-static float CalcNewClassifersErr(const float fOldDataWeigths[],
-                                  const int ErrHx[], int ErrNumX) {
-  float err = 0;
-  for (int i = 0; i < ErrNumX; i++) {
-    err += fOldDataWeigths[ErrHx[i] - 1];
-  }
-  return err;
+  return (finalPrediction >= 0) ? 1 : -1;
 }
