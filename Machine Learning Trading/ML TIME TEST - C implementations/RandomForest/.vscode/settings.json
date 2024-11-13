@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.gpan": "vb",
+        "data.h": "c",
+        "decisiontree.h": "c"
+    }
+}
